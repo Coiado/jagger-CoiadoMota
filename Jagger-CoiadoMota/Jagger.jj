@@ -1,0 +1,193 @@
+// Options for JavaCC.
+options { LOOKAHEAD=1; }
+
+// Fonction principale
+PARSER_BEGIN(Jagger)
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.HashMap;
+import java.util.Stack;
+import ast.*;
+
+public class Jagger
+{
+  	public static Stack<Context> stack; //Used for scope modelisation
+    public static void main(String args[]) throws ParseException
+    {
+        Jagger parser = new Jagger(System.in);
+        try {
+			parser.mainloop();
+        }catch(Exception e) {
+			throw new Error("Bad Sytax"); 
+        }
+        
+    }
+}
+PARSER_END(Jagger)
+
+// Characters to ignore.
+SKIP: { " " | "\r" | "\t" }
+
+// Token specifications.
+TOKEN:
+{
+    < NUMBER: (<DIGIT>)+ ("." (<DIGIT>)*)? >  // A decimal number.
+|   < DIGIT: ["0"-"9"] >                      // A decimal digit.
+|   < EOL: "\n" >                             // End of line.
+|   < QUIT: "q\n">							 // End of program
+|   < PRINT: "print">						 // Mot clé print
+|   < TRUE: "true">						 // True statement
+|   < FALSE: "false">						 // False statement
+|   < IF: "if">
+|   < THEN: "then">
+|   < ELSE: "else">
+|   < LET: "let">
+|   < VAR: "var">
+|   < IN: "in">
+|   < END: "end">
+|   < VARIABLE: <LETTER> ((<DIGIT>)* ((<LETTER>)*)?)?>
+|   < LETTER: ["a"-"z","A"-"Z"]>
+|   < SEPARATOR: ",">
+}
+
+// Main lopp: read expressions on a line until end of file.
+//     mainloop → (expression <EOL>)* <EOF>
+void mainloop():
+{Instruction a;}
+{
+  
+    (
+      a=inst() <EOL> {
+			if(a!=null) {
+    		  		Memory m = new Memory();
+    		  		EvaluatorDouble vi = new EvaluatorDouble(m);
+    		  		EvaluatorBoolean vb = new EvaluatorBoolean(vi);
+    		  		try {a.accepter(new EvaluatorInstruction(vi,vb)); }
+    		  		catch(Exception e) {e.printStackTrace();System.exit(0);}
+				
+			}
+    		
+	  }
+    )*
+    <EOF>
+}
+
+//Each expression must start by a "let", have an "in" inside and finish by an "end"
+//Exp letInEnd():
+//{Token t; Exp a; Instruction b}
+//{
+//  <LET> {
+//          Memory scope = new Memory();
+//          stack.push(scope); //Creating a new scope
+//        }
+//  (
+//    <VAR> t=<VARIABLE> ":=" b=inst() {
+//      Exp exist = scope.write(t.toString(), b);
+//      if(exist != null){
+//        System.out.println("Error: Variable "+ t.toString() + " already declared in this scope");
+//        System.exit(0);
+//      }
+//    }
+//  )*
+//  <IN> (a=inst() {exp.add(a);}(<SEPARATOR>)?)* <END> {
+//    a = new LetInEnd(scope, exp);
+//    stack.pop();
+//    return a;
+//  }
+//}
+
+
+//Next higher priority is binary comparison
+ExpBoolean comp():
+{Token t; Exp a,b; ExpBoolean c;}
+{
+  a = expression()
+  (
+    "="  b = expression() {c = new Equal(a,b);}
+  | "<>" b = expression() {c = new Notequal(a,b);}
+  | "<=" b = expression() {c = new Lequal(a,b);}
+  | "<"  b = expression() {c = new Lower(a,b);}
+  | ">=" b = expression() {c = new Gequal(a,b);}
+  | ">"  b = expression() {c = new Greater(a,b);}
+  | {c=new AritBool(a);}
+  ) {return c;}
+}
+
+// Expression (the axiom).
+// E -> T ('+'T | '-'T)*
+Exp expression():
+{ Exp a,b; }
+{
+    a=term()
+    (
+      "+" b=term() { a = new Add(a,b); }
+    | "-" b=term() { a = new Sub(a,b); }
+    )* { return a; }
+}
+
+
+
+// Term.
+// T -> F ('*'F | '/'F)*
+Exp term():
+{ Exp a,b; }
+{
+    a=term2()
+    (
+      "*" b=term2() { a = new Mul(a,b); }
+    | "/" b=term2() { a = new Div(a,b); }
+    )* { return a; }
+}
+
+Exp term2():
+{Exp a;}
+{
+  a = uni() {return a;}
+}
+
+
+
+Exp uni():
+{ Exp a; }
+{
+       "-" a =factor()  { return new Mul(new Num(-1.0),a); }
+      | "+" a =factor()  { return a; }
+      | a =factor()  { return a; }
+}
+
+//Call the Evaluateur visitor
+Instruction inst():
+{Token t; Instruction a,b,c;ExpBoolean e;}
+{
+
+	 <IF> a = inst() <THEN> b = inst()
+      <ELSE> c=inst() 
+      {
+        return new Ifthenelse(a, b, c);
+      }
+  |  t=<PRINT> "(" e=comp() ")" { return new Print(e); }
+  |  e=comp() { return new BasicInstruction(e); }
+}
+
+
+
+// Factor of an expression.
+// F -> <NUMBER> | "(" E ")"
+Exp factor():
+{ Token t; Exp e; }
+{
+      t=<NUMBER> { return new Num(Double.parseDouble(t.toString())); }
+  	  | "(" e=expression() ")" {return e;}
+      | t = <FALSE> {return new Bool(false);}
+      | t = <TRUE> {return new Bool(true);}
+      | "\"" e= string() "\"" { return e;}
+      | <QUIT>{System.out.print("Quit application\n");System.exit(0);}
+}
+
+Exp string():
+{ Token t; }
+{
+      t=<NUMBER> { return new Str(t.toString()); }
+  	  | t = <VARIABLE> { return new Str(t.toString()); }
+}
